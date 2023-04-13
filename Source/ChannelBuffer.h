@@ -32,6 +32,7 @@
 class ChannelBuffer
 {
 public:
+   ChannelBuffer();
    ChannelBuffer(int bufferSize);
    ChannelBuffer(float* data, int bufferSize); //intended as a temporary holder for passing raw data to methods that want a ChannelBuffer
    ~ChannelBuffer();

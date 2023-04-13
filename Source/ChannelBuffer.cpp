@@ -27,6 +27,14 @@
 
 #include "ChannelBuffer.h"
 
+ChannelBuffer::ChannelBuffer()
+{
+   mNumChannels = kMaxNumChannels;
+   mOwnsBuffers = true;
+
+   Setup(gBufferSize);
+}
+
 ChannelBuffer::ChannelBuffer(int bufferSize)
 {
    mNumChannels = kMaxNumChannels;
