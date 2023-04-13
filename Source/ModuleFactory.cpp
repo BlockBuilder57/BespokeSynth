@@ -258,6 +258,7 @@
 #include "SongBuilder.h"
 #include "PulseFlag.h"
 #include "PulseDisplayer.h"
+#include "Warp.h"
 
 #include <juce_core/juce_core.h>
 
@@ -463,6 +464,7 @@ ModuleFactory::ModuleFactory()
    REGISTER(TimelineControl, timelinecontrol, kModuleCategory_Other);
    REGISTER(PulseFlag, pulseflag, kModuleCategory_Pulse);
    REGISTER(PulseDisplayer, pulsedisplayer, kModuleCategory_Pulse);
+   REGISTER(Warp, warp, kModuleCategory_Audio);
 
    //REGISTER_EXPERIMENTAL(MidiPlayer, midiplayer, kModuleCategory_Instrument);
    REGISTER_HIDDEN(Autotalent, autotalent, kModuleCategory_Audio);

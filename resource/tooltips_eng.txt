@@ -1916,6 +1916,11 @@ scale~controls the global scale used by various modules
 
 
 
+warp~warps audio signals around based on an identifier, similar to buses/sends
+~ident~the identifier to send/receive audio signals on
+
+
+
 output~route audio in here to send it to an output channel (your speakers or audio interface)
 ~ch~channel (or channels, if you want stereo) to send audio to
 

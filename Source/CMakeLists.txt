@@ -693,6 +693,8 @@ target_sources(BespokeSynth PRIVATE
     VocoderCarrierInput.h
     VolcaBeatsControl.cpp
     VolcaBeatsControl.h
+    Warp.cpp
+    Warp.h
     WaveformViewer.cpp
     WaveformViewer.h
     Waveshaper.cpp
