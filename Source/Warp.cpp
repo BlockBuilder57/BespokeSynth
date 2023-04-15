@@ -27,23 +27,108 @@ Warp::Warp()
 {
 }
 
-std::map<std::string, ChannelBuffer*> Warp::mBuffers{};
+void Warp::Init()
+{
+   IDrawableModule::Init();
 
-ChannelBuffer* Warp::GetBufferByIdent(std::string ident)
+   TheTransport->AddAudioPoller(this);
+}
+
+std::map<std::string, std::vector<Warp*>> Warp::mInputs{};
+std::map<std::string, std::vector<Warp*>> Warp::mOutputs{};
+
+std::vector<Warp*>* Warp::GetInputsByIdent(std::string ident)
 {
    if (ident.empty())
       return nullptr;
 
-   // create the buffer of this ident if it doesn't already exist
-   if (mBuffers.find(mIdent) == mBuffers.end())
-      mBuffers[mIdent] = new ChannelBuffer();
+   // create the vector for this ident if it doesn't already exist
+   if (mInputs.find(mIdent) == mInputs.end())
+      mInputs[mIdent] = {};
 
-   return mBuffers[mIdent];
+   return &mInputs[mIdent];
+}
+std::vector<Warp*>* Warp::GetOutputsByIdent(std::string ident)
+{
+   if (ident.empty())
+      return nullptr;
+
+   // create the vector for this ident if it doesn't already exist
+   if (mOutputs.find(mIdent) == mOutputs.end())
+      mOutputs[mIdent] = {};
+
+   return &mOutputs[mIdent];
+}
+
+void Warp::AddInputByIdent(Warp* warp, std::string ident)
+{
+   // if this is an output, remove it
+   RemoveOutputByIdent(warp, ident);
+
+   std::vector<Warp*>* inputs = GetInputsByIdent(ident);
+   if (inputs == nullptr)
+      return;
+
+   if (std::find(inputs->begin(), inputs->end(), warp) == inputs->end())
+   {
+      //ofLog() << warp->Name() << " becoming an input for " << mIdent << "!";
+      warp->mBehavior = Warp::Behavior::Input;
+      inputs->emplace_back(warp);
+   }
+}
+void Warp::AddOutputByIdent(Warp* warp, std::string ident)
+{
+   // if this is an input, remove it
+   RemoveInputByIdent(warp, ident);
+
+   std::vector<Warp*>* outputs = GetOutputsByIdent(ident);
+   if (outputs == nullptr)
+      return;
+
+   if (std::find(outputs->begin(), outputs->end(), warp) == outputs->end())
+   {
+      //ofLog() << warp->Name() << " becoming an output for " << mIdent << "!";
+      warp->mBehavior = Warp::Behavior::Output;
+      outputs->emplace_back(warp);
+   }
+}
+void Warp::RemoveInputByIdent(Warp* warp, std::string ident)
+{
+   std::vector<Warp*>* inputs = GetInputsByIdent(ident);
+   if (inputs == nullptr)
+      return;
+
+   if (std::find(inputs->begin(), inputs->end(), warp) != inputs->end())
+   {
+      //ofLog() << Name() << " uninputting for " << ident;
+      warp->mBehavior = Warp::Behavior::None;
+      inputs->erase(std::remove(inputs->begin(), inputs->end(), warp), inputs->end());
+
+      if (inputs->empty())
+         mInputs.erase(ident);
+   }
+}
+void Warp::RemoveOutputByIdent(Warp* warp, std::string ident)
+{
+   std::vector<Warp*>* outputs = GetOutputsByIdent(ident);
+   if (outputs == nullptr)
+      return;
+
+   if (std::find(outputs->begin(), outputs->end(), warp) != outputs->end())
+   {
+      //ofLog() << Name() << " unoutputting for " << ident;
+      warp->mBehavior = Warp::Behavior::None;
+      outputs->erase(std::remove(outputs->begin(), outputs->end(), warp), outputs->end());
+
+      if (outputs->empty())
+         mOutputs.erase(ident);
+   }
 }
 
 void Warp::CreateUIControls()
 {
    IDrawableModule::CreateUIControls();
+
    mIdentEntry = new TextEntry(this, "ident", 5, 2, 12, &mIdent);
 }
 
@@ -54,41 +139,106 @@ void Warp::Process(double time)
    if (!mEnabled)
       return;
 
-   auto buf = GetBufferByIdent(mIdent);
-   if (buf == nullptr)
-      return;
-
    SyncBuffers();
 
-   // FIXME: hack until I can find the proper method of checking for any inputs
-   std::string_view name = std::string_view(Name());
-   if (name.find("in") != std::string::npos)
+   // if we have nothing pointing to us, let's bail
+   // FIXME: is there a better way of doing this?
+
+   bool targeted = false;
+   std::vector<IDrawableModule*> modules;
+   TheSynth->GetAllModules(modules);
+   for (IDrawableModule* mod : modules)
    {
-      // add the input to the ident buffer, this should support multiple channels just fine
-      for (int ch = 0; ch < buf->NumActiveChannels(); ++ch)
+      auto cableSrc = mod->GetPatchCableSource();
+
+      if (cableSrc != nullptr && cableSrc->GetTarget() == this)
       {
-         Add(buf->GetChannel(ch), GetBuffer()->GetChannel(ch), buf->BufferSize());
+         targeted = true;
+         break;
       }
    }
 
-   IAudioReceiver* target = GetTarget();
-   if (target)
+   if (!targeted && GetTarget() == nullptr)
    {
-      ChannelBuffer* out = target->GetBuffer();
+      RemoveInputByIdent(this, mIdent);
+      RemoveOutputByIdent(this, mIdent);
+   }
+   else if (GetTarget() == nullptr)
+      AddInputByIdent(this, mIdent);
+   else
+      AddOutputByIdent(this, mIdent);
 
-      // we'll actually want to match the buffer's channels here, so we're
-      // always "broadcasting" what we need to be
+   auto cableSrc = IDrawableModule::GetPatchCableSource();
+
+
+   if (mBehavior == Warp::Behavior::Input)
+   {
+      // pulse the viz buffer - we're wireless, so we want to communicate to the user as much as possible
       for (int ch = 0; ch < GetBuffer()->NumActiveChannels(); ++ch)
-      {
-         Add(out->GetChannel(ch), buf->GetChannel(ch), out->BufferSize());
-         GetVizBuffer()->WriteChunk(buf->GetChannel(ch), GetBuffer()->BufferSize(), ch);
-      }
+         GetVizBuffer()->WriteChunk(GetBuffer()->GetChannel(ch), GetBuffer()->BufferSize(), ch);
 
-      // TODO: move resetting somewhere more "global", so multiple modules can output the same ident
-      buf->Reset();
+      if (cableSrc != nullptr)
+         cableSrc->SetEnabled(false);
+   }
+   else {
+      if (cableSrc != nullptr)
+         cableSrc->SetEnabled(true);
    }
 
-   GetBuffer()->Reset();
+   // we'll need to clear our own buffer if nothing will for us
+   std::vector<Warp*>* outputs = GetOutputsByIdent(mIdent);
+   if (outputs == nullptr || outputs->empty())
+      GetBuffer()->Clear();
+}
+
+void Warp::OnTransportAdvanced(float amount)
+{
+   if (mBehavior == Warp::Behavior::Input)
+      return;
+
+   if (!mEnabled)
+      return;
+
+   std::vector<Warp*>* inputs = GetInputsByIdent(mIdent);
+   std::vector<Warp*>* outputs = GetOutputsByIdent(mIdent);
+   if (inputs == nullptr || outputs == nullptr)
+      return;
+
+   if (!inputs->empty())
+   {
+      // can happen when we delete the module
+      if (GetTarget() == nullptr)
+         return;
+
+      ChannelBuffer* out = GetTarget()->GetBuffer();
+
+      // we check inputs with the name of our ident, and copy their buffer in
+      for (Warp* warp : *inputs)
+      {
+         // don't use disabled inputs
+         if (!warp->IsEnabled())
+            continue;
+
+         //ofLog() << Name() << ": Checking " << warp->Name();
+         ChannelBuffer* warpBuf = warp->GetBuffer();
+
+         // unholy matrimony of two buffers, so let's use the lowest channel count to avoid errors
+         int channelCount = std::min(out->NumActiveChannels(), warpBuf->NumActiveChannels());
+         for (int ch = 0; ch < channelCount; ++ch)
+         {
+            GetVizBuffer()->WriteChunk(warpBuf->GetChannel(ch), warpBuf->BufferSize(), ch);
+            Add(out->GetChannel(ch), warpBuf->GetChannel(ch), warpBuf->BufferSize());
+         }
+
+         // the last output to be processed is the one to reset the buffers on the inputs
+         // "close the door on your way out"
+         if (!outputs->empty() && outputs->front() == this)
+         {
+            //ofLog() << Name() << ": clearing " << warp->Name() << "'s buffer!";
+            warpBuf->Reset();
+         }
+      }
+   }
 }
 
 void Warp::DrawModule()
@@ -99,15 +249,64 @@ void Warp::DrawModule()
    mIdentEntry->Draw();
 }
 
+void Warp::DrawModuleUnclipped()
+{
+   if (!mEnabled)
+      return;
+
+   if (mDrawDebug)
+   {
+      int yOff = 30;
+      DrawTextNormal("~ Global info", 0, yOff += 10);
+      DrawTextNormal("Idents (input): " + std::to_string(mInputs.size()), 0, yOff += 10);
+      DrawTextNormal("Idents (output): " + std::to_string(mOutputs.size()), 0, yOff += 10);
+      DrawTextNormal("Inputs on this ident: " + std::to_string(mInputs[mIdent].size()), 0, yOff += 10);
+      DrawTextNormal("Outputs on this ident: " + std::to_string(mOutputs[mIdent].size()), 0, yOff += 10);
+
+      DrawTextNormal("~ Local info", 0, yOff += 20);
+      switch (mBehavior)
+      {
+         case Warp::Behavior::Input:
+         {
+            DrawTextNormal("<IS AN INPUT>", 0, yOff += 10);
+            break;
+         }
+         case Warp::Behavior::Output:
+         {
+            DrawTextNormal("<IS AN OUTPUT>", 0, yOff += 10);
+            if (this == mOutputs[mIdent].front())
+               DrawTextNormal("last to output!", 0, yOff += 10);
+            break;
+         }
+         default:
+         {
+            DrawTextNormal("No behavior!", 0, yOff += 10);
+            break;
+         }
+      }
+   }
+}
+
+void Warp::Exit()
+{
+   IDrawableModule::Exit();
+   RemoveInputByIdent(this, mIdent);
+   RemoveOutputByIdent(this, mIdent);
+}
+
 void Warp::TextEntryComplete(TextEntry* entry)
 {
-   // if we're switching off an ident, we can erase it
-   // anything that needs that ident in the future can just make a new one
-   if (!mIdentPrev.empty())
+   // when switching away from an ident, we need to update the map
+
+   if (mBehavior == Warp::Behavior::Input)
    {
-      // TODO: i'm bad at memory management with maps, please verify this actually works well
-      delete mBuffers[mIdentPrev];
-      mBuffers.erase(mIdentPrev);
+      RemoveInputByIdent(this, mIdentPrev);
+      AddInputByIdent(this, mIdent);
+   }
+   else if (mBehavior == Warp::Behavior::Output)
+   {
+      RemoveOutputByIdent(this, mIdentPrev);
+      AddOutputByIdent(this, mIdent);
    }
 
    mIdentPrev = mIdent;
@@ -116,6 +315,8 @@ void Warp::TextEntryComplete(TextEntry* entry)
 void Warp::LoadLayout(const ofxJSONElement& moduleInfo)
 {
    mModuleSaveData.LoadString("target", moduleInfo);
+   mIdent = mModuleSaveData.LoadString("ident", moduleInfo, "default");
+   mIdentPrev = mIdent;
 
    SetUpFromSaveData();
 }
@@ -124,4 +325,5 @@ void Warp::SetUpFromSaveData()
 {
    SetTarget(TheSynth->FindModule(mModuleSaveData.GetString("target")));
    mIdent = mModuleSaveData.GetString("ident");
+   mIdentPrev = mIdent;
 }

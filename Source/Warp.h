@@ -23,19 +23,25 @@
 #include "Checkbox.h"
 #include "IAudioProcessor.h"
 #include "PatchCableSource.h"
+#include "Transport.h"
 
-class Warp : public IAudioProcessor, public IDrawableModule, public ITextEntryListener
+class Warp : public IAudioProcessor, public IDrawableModule, public ITextEntryListener, public IAudioPoller
 {
 public:
    Warp();
    static IDrawableModule* Create() { return new Warp(); }
    static bool AcceptsAudio() { return true; }
 
+   void Init() override;
    void CreateUIControls() override;
+   bool HasDebugDraw() const override { return true; }
 
    //IAudioSource
    void Process(double time) override;
    void SetEnabled(bool enabled) override { mEnabled = enabled; }
+
+   //IAudioPoller
+   void OnTransportAdvanced(float amount) override;
 
    //ITextEntryListener
    void TextEntryComplete(TextEntry* entry) override;
@@ -45,20 +51,40 @@ public:
 
    bool IsEnabled() const override { return mEnabled; }
 
-   static std::map<std::string, ChannelBuffer*> mBuffers;
-   ChannelBuffer* GetBufferByIdent(std::string ident);
+   static std::map<std::string, std::vector<Warp*>> mInputs;
+   static std::map<std::string, std::vector<Warp*>> mOutputs;
+
+   std::vector<Warp*>* GetInputsByIdent(std::string ident);
+   std::vector<Warp*>* GetOutputsByIdent(std::string ident);
+
+   inline bool InputsHasIdent(std::string ident) { return mInputs.find(ident) != mInputs.end(); }
+   inline bool OutputsHasIdent(std::string ident) { return mOutputs.find(ident) != mOutputs.end(); }
+
+   void AddInputByIdent(Warp* warp, std::string ident);
+   void AddOutputByIdent(Warp* warp, std::string ident);
+   void RemoveInputByIdent(Warp* warp, std::string ident);
+   void RemoveOutputByIdent(Warp* warp, std::string ident);
 
 private:
    //IDrawableModule
    void DrawModule() override;
+   void DrawModuleUnclipped() override;
    void GetModuleDimensions(float& w, float& h) override
    {
       w = 118;
       h = 22;
    }
+   void Exit() override;
 
-   std::string mIdent {"default"};
-   std::string mIdentPrev {"default"};
+   enum class Behavior
+   {
+      None,
+      Input,
+      Output
+   };
+   Behavior mBehavior;
+
+   std::string mIdent{ "default" };
+   std::string mIdentPrev{ "default" };
    TextEntry* mIdentEntry;
-
 };
