@@ -33,9 +33,16 @@ void Warp::Init()
 
    TheTransport->AddAudioPoller(this);
 }
+void Warp::Exit()
+{
+   IDrawableModule::Exit();
+   RemoveInputByIdent(this, mIdent);
+   RemoveOutputByIdent(this, mIdent);
+}
 
 std::map<std::string, std::vector<Warp*>> Warp::mInputs{};
 std::map<std::string, std::vector<Warp*>> Warp::mOutputs{};
+std::map<std::string, Warp*> Warp::mLastOutput;
 
 std::vector<Warp*>* Warp::GetInputsByIdent(std::string ident)
 {
@@ -43,10 +50,10 @@ std::vector<Warp*>* Warp::GetInputsByIdent(std::string ident)
       return nullptr;
 
    // create the vector for this ident if it doesn't already exist
-   if (mInputs.find(mIdent) == mInputs.end())
-      mInputs[mIdent] = {};
+   if (mInputs.find(ident) == mInputs.end())
+      mInputs[ident] = {};
 
-   return &mInputs[mIdent];
+   return &mInputs[ident];
 }
 std::vector<Warp*>* Warp::GetOutputsByIdent(std::string ident)
 {
@@ -54,10 +61,10 @@ std::vector<Warp*>* Warp::GetOutputsByIdent(std::string ident)
       return nullptr;
 
    // create the vector for this ident if it doesn't already exist
-   if (mOutputs.find(mIdent) == mOutputs.end())
-      mOutputs[mIdent] = {};
+   if (mOutputs.find(ident) == mOutputs.end())
+      mOutputs[ident] = {};
 
-   return &mOutputs[mIdent];
+   return &mOutputs[ident];
 }
 
 void Warp::AddInputByIdent(Warp* warp, std::string ident)
@@ -71,7 +78,7 @@ void Warp::AddInputByIdent(Warp* warp, std::string ident)
 
    if (std::find(inputs->begin(), inputs->end(), warp) == inputs->end())
    {
-      //ofLog() << warp->Name() << " becoming an input for " << mIdent << "!";
+      //ofLog() << warp->Name() << " becoming an input for " << ident << "!";
       warp->mBehavior = Warp::Behavior::Input;
       inputs->emplace_back(warp);
    }
@@ -87,7 +94,7 @@ void Warp::AddOutputByIdent(Warp* warp, std::string ident)
 
    if (std::find(outputs->begin(), outputs->end(), warp) == outputs->end())
    {
-      //ofLog() << warp->Name() << " becoming an output for " << mIdent << "!";
+      //ofLog() << warp->Name() << " becoming an output for " << ident << "!";
       warp->mBehavior = Warp::Behavior::Output;
       outputs->emplace_back(warp);
    }
@@ -100,7 +107,7 @@ void Warp::RemoveInputByIdent(Warp* warp, std::string ident)
 
    if (std::find(inputs->begin(), inputs->end(), warp) != inputs->end())
    {
-      //ofLog() << Name() << " uninputting for " << ident;
+      //ofLog() << warp->Name() << " uninputting for " << ident;
       warp->mBehavior = Warp::Behavior::None;
       inputs->erase(std::remove(inputs->begin(), inputs->end(), warp), inputs->end());
 
@@ -116,7 +123,7 @@ void Warp::RemoveOutputByIdent(Warp* warp, std::string ident)
 
    if (std::find(outputs->begin(), outputs->end(), warp) != outputs->end())
    {
-      //ofLog() << Name() << " unoutputting for " << ident;
+      //ofLog() << warp->Name() << " unoutputting for " << ident;
       warp->mBehavior = Warp::Behavior::None;
       outputs->erase(std::remove(outputs->begin(), outputs->end(), warp), outputs->end());
 
@@ -351,6 +358,8 @@ void Warp::Process(double time)
 
    auto cableSrc = IDrawableModule::GetPatchCableSource();
 
+   if (cableSrc != nullptr && !cableSrc->Enabled())
+      cableSrc->SetEnabled(true);
 
    if (mBehavior == Warp::Behavior::Input)
    {
@@ -361,24 +370,43 @@ void Warp::Process(double time)
       if (cableSrc != nullptr)
          cableSrc->SetEnabled(false);
    }
-   else {
-      if (cableSrc != nullptr)
-         cableSrc->SetEnabled(true);
+
+   if (mBehavior == Warp::Behavior::Output)
+   {
+      mLastOutput[mIdent] = this;
    }
+   else
+   {
+      // we'll need to clear our own buffer if nothing will for us
+      bool shouldClear = true;
 
-   // we'll need to clear our own buffer if nothing will for us
-   std::vector<Warp*>* outputs = GetOutputsByIdent(mIdent);
-   if (outputs == nullptr || outputs->empty())
-      GetBuffer()->Clear();
+      std::vector<Warp*>* outputs = GetOutputsByIdent(mIdent);
+      if (outputs != nullptr)
+      {
+         for (Warp* output : *outputs) {
+            if (output->IsEnabled()) {
+               shouldClear = false;
+               break;
+            }
+         }
+      }
+
+      if (shouldClear)
+         GetBuffer()->Clear();
+   }
 }
-
 void Warp::OnTransportAdvanced(float amount)
 {
-   if (mBehavior == Warp::Behavior::Input)
+   if (mBehavior != Warp::Behavior::Output)
       return;
 
    if (!mEnabled)
       return;
+
+   if (GetTarget() == nullptr)
+      return;
+
+   GetBuffer()->SetNumActiveChannels(1);
 
    std::vector<Warp*>* inputs = GetInputsByIdent(mIdent);
    std::vector<Warp*>* outputs = GetOutputsByIdent(mIdent);
@@ -387,12 +415,6 @@ void Warp::OnTransportAdvanced(float amount)
 
    if (!inputs->empty())
    {
-      // can happen when we delete the module
-      if (GetTarget() == nullptr)
-         return;
-
-      ChannelBuffer* out = GetTarget()->GetBuffer();
-
       // we check inputs with the name of our ident, and copy their buffer in
       for (Warp* warp : *inputs)
       {
@@ -400,26 +422,34 @@ void Warp::OnTransportAdvanced(float amount)
          if (!warp->IsEnabled())
             continue;
 
-         //ofLog() << Name() << ": Checking " << warp->Name();
          ChannelBuffer* warpBuf = warp->GetBuffer();
 
-         // unholy matrimony of two buffers, so let's use the lowest channel count to avoid errors
-         int channelCount = std::min(out->NumActiveChannels(), warpBuf->NumActiveChannels());
-         for (int ch = 0; ch < channelCount; ++ch)
-         {
-            GetVizBuffer()->WriteChunk(warpBuf->GetChannel(ch), warpBuf->BufferSize(), ch);
-            Add(out->GetChannel(ch), warpBuf->GetChannel(ch), warpBuf->BufferSize());
-         }
+         if (GetBuffer()->NumActiveChannels() < warpBuf->NumActiveChannels())
+            GetBuffer()->SetNumActiveChannels(warpBuf->NumActiveChannels());
+
+         for (int ch = 0; ch < warpBuf->NumActiveChannels(); ++ch)
+            Add(GetBuffer()->GetChannel(ch), warpBuf->GetChannel(ch), warpBuf->BufferSize());
 
          // the last output to be processed is the one to reset the buffers on the inputs
          // "close the door on your way out"
-         if (!outputs->empty() && outputs->front() == this)
-         {
-            //ofLog() << Name() << ": clearing " << warp->Name() << "'s buffer!";
+         if (mLastOutput[mIdent] == this)
             warpBuf->Reset();
-         }
       }
    }
+
+   SyncOutputBuffer(GetBuffer()->NumActiveChannels());
+
+   ChannelBuffer* out = GetTarget()->GetBuffer();
+
+   for (int ch = 0; ch < GetBuffer()->NumActiveChannels(); ++ch)
+   {
+      auto channel = GetBuffer()->GetChannel(ch);
+
+      GetVizBuffer()->WriteChunk(channel, GetBuffer()->BufferSize(), ch);
+      Add(out->GetChannel(ch), channel, out->BufferSize());
+   }
+
+   GetBuffer()->Clear();
 }
 
 void Warp::DrawModule()
@@ -429,7 +459,6 @@ void Warp::DrawModule()
 
    mIdentEntry->Draw();
 }
-
 void Warp::DrawModuleUnclipped()
 {
    if (!mEnabled)
@@ -438,13 +467,10 @@ void Warp::DrawModuleUnclipped()
    if (mDrawDebug)
    {
       int yOff = 30;
-      DrawTextNormal("~ Global info", 0, yOff += 10);
-      DrawTextNormal("Idents (input): " + std::to_string(mInputs.size()), 0, yOff += 10);
-      DrawTextNormal("Idents (output): " + std::to_string(mOutputs.size()), 0, yOff += 10);
-      DrawTextNormal("Inputs on this ident: " + std::to_string(mInputs[mIdent].size()), 0, yOff += 10);
-      DrawTextNormal("Outputs on this ident: " + std::to_string(mOutputs[mIdent].size()), 0, yOff += 10);
 
-      DrawTextNormal("~ Local info", 0, yOff += 20);
+      DrawTextNormal("~ Local info", 0, yOff += 10);
+      //DrawTextNormal("Ident: " + mIdent, 0, yOff += 10);
+      //DrawTextNormal("Prev ident: " + mIdentPrev, 0, yOff += 10);
       switch (mBehavior)
       {
          case Warp::Behavior::Input:
@@ -455,8 +481,8 @@ void Warp::DrawModuleUnclipped()
          case Warp::Behavior::Output:
          {
             DrawTextNormal("<IS AN OUTPUT>", 0, yOff += 10);
-            if (this == mOutputs[mIdent].front())
-               DrawTextNormal("last to output!", 0, yOff += 10);
+            if (mLastOutput[mIdent] == this)
+            DrawTextNormal("the last output for " + mIdent, 0, yOff += 10);
             break;
          }
          default:
@@ -465,30 +491,22 @@ void Warp::DrawModuleUnclipped()
             break;
          }
       }
-   }
-}
 
-void Warp::Exit()
-{
-   IDrawableModule::Exit();
-   RemoveInputByIdent(this, mIdent);
-   RemoveOutputByIdent(this, mIdent);
+      DrawTextNormal("~ Global info", 0, yOff += 20);
+      DrawTextNormal("Idents (input): " + std::to_string(mInputs.size()), 0, yOff += 10);
+      DrawTextNormal("Idents (output): " + std::to_string(mOutputs.size()), 0, yOff += 10);
+      DrawTextNormal("Inputs on this ident: " + std::to_string(mInputs[mIdent].size()), 0, yOff += 10);
+      DrawTextNormal("Outputs on this ident: " + std::to_string(mOutputs[mIdent].size()), 0, yOff += 10);
+      if (mLastOutput[mIdent] != nullptr)
+         DrawTextNormal("Last output on this ident: " + std::string(mLastOutput[mIdent]->Name()), 0, yOff += 10);
+   }
 }
 
 void Warp::TextEntryComplete(TextEntry* entry)
 {
-   // when switching away from an ident, we need to update the map
-
-   if (mBehavior == Warp::Behavior::Input)
-   {
-      RemoveInputByIdent(this, mIdentPrev);
-      AddInputByIdent(this, mIdent);
-   }
-   else if (mBehavior == Warp::Behavior::Output)
-   {
-      RemoveOutputByIdent(this, mIdentPrev);
-      AddOutputByIdent(this, mIdent);
-   }
+   // when switching away from an ident, we need to update the maps
+   RemoveInputByIdent(this, mIdentPrev);
+   RemoveOutputByIdent(this, mIdentPrev);
 
    mIdentPrev = mIdent;
 }
@@ -501,7 +519,6 @@ void Warp::LoadLayout(const ofxJSONElement& moduleInfo)
 
    SetUpFromSaveData();
 }
-
 void Warp::SetUpFromSaveData()
 {
    SetTarget(TheSynth->FindModule(mModuleSaveData.GetString("target")));

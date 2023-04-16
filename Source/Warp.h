@@ -52,20 +52,6 @@ public:
 
    bool IsEnabled() const override { return mEnabled; }
 
-   static std::map<std::string, std::vector<Warp*>> mInputs;
-   static std::map<std::string, std::vector<Warp*>> mOutputs;
-
-   std::vector<Warp*>* GetInputsByIdent(std::string ident);
-   std::vector<Warp*>* GetOutputsByIdent(std::string ident);
-
-   inline bool InputsHasIdent(std::string ident) { return mInputs.find(ident) != mInputs.end(); }
-   inline bool OutputsHasIdent(std::string ident) { return mOutputs.find(ident) != mOutputs.end(); }
-
-   void AddInputByIdent(Warp* warp, std::string ident);
-   void AddOutputByIdent(Warp* warp, std::string ident);
-   void RemoveInputByIdent(Warp* warp, std::string ident);
-   void RemoveOutputByIdent(Warp* warp, std::string ident);
-
 private:
    //IDrawableModule
    void DrawModule() override;
@@ -76,6 +62,18 @@ private:
       h = 22;
    }
    void Exit() override;
+
+   static std::map<std::string, std::vector<Warp*>> mInputs;
+   static std::map<std::string, std::vector<Warp*>> mOutputs;
+   static std::map<std::string, Warp*> mLastOutput;
+
+   static std::vector<Warp*>* GetInputsByIdent(std::string ident);
+   static std::vector<Warp*>* GetOutputsByIdent(std::string ident);
+
+   static void AddInputByIdent(Warp* warp, std::string ident);
+   static void AddOutputByIdent(Warp* warp, std::string ident);
+   static void RemoveInputByIdent(Warp* warp, std::string ident);
+   static void RemoveOutputByIdent(Warp* warp, std::string ident);
 
    enum class Behavior
    {
