@@ -34,6 +34,7 @@ public:
 
    void Init() override;
    void CreateUIControls() override;
+   void Render() override;
    bool HasDebugDraw() const override { return true; }
 
    //IAudioSource

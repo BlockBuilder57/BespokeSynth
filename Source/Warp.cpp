@@ -132,6 +132,187 @@ void Warp::CreateUIControls()
    mIdentEntry = new TextEntry(this, "ident", 5, 2, 12, &mIdent);
 }
 
+void Warp::Render()
+{
+   IDrawableModule::Render();
+
+   if (!mEnabled)
+      return;
+
+   if (mBehavior != Warp::Behavior::Output)
+      return;
+
+   std::vector<Warp*>* inputs = GetInputsByIdent(mIdent);
+   if (inputs == nullptr || inputs->empty())
+      return;
+
+   ofRectangle rThis = GetRect();
+   float tbThis = HasTitleBar() ? TitleBarHeight() : 0;
+
+   const float lineWidth = 0.75f;
+   const float lineScale = 6.f;
+   const float lineAlpha = 100.0f;
+   const float markerScaleStart = lineScale * 1.5f;
+   const float markerScaleEnd = lineScale * 0.5f;
+   const float markerDist = lineScale * 0.5f;
+   const ofColor lineColor = ofColor::yellow;
+
+   ofPushMatrix();
+   ofPushStyle();
+
+   ofSetLineWidth(lineWidth);
+
+   for (Warp* input : *inputs)
+   {
+      // don't use disabled inputs
+      if (!input->IsEnabled())
+         continue;
+
+      RollingBuffer* vizBuff = input->GetVizBuffer();
+      assert(vizBuff);
+      int numSamples = vizBuff->Size();
+
+      bool allZero = true;
+      for (int ch = 0; ch < vizBuff->NumChannels(); ++ch)
+      {
+         for (int i = 0; i < numSamples && allZero; ++i)
+         {
+            if (vizBuff->GetSample(i, ch) != 0)
+               allZero = false;
+         }
+      }
+
+      if (allZero)
+         continue;
+
+      ofRectangle rInput = input->GetRect();
+      float tbInput = HasTitleBar() ? TitleBarHeight() : 0;
+
+      ofVec2f start, end;
+
+      FindClosestSides(rInput.x, rInput.y - tbInput, rInput.width, rInput.height + tbInput,
+                       rThis.x, rThis.y - tbThis, rThis.width, rThis.height + tbThis,
+                       start.x, start.y, end.x, end.y);
+
+      float wireLength = sqrtf((end - start).lengthSquared());
+      float wireSection = std::min(wireLength, 175.f);
+
+      ofVec2f delta = (end - start) / wireLength;
+      ofVec2f deltaParallel(delta.y, -delta.x);
+      float cableStepSize = 6.f;
+
+      for (int ch = 0; ch < vizBuff->NumChannels(); ++ch)
+      {
+         ofColor drawColor;
+         if (ch == 0)
+            drawColor.set(lineColor.r, lineColor.g, lineColor.b, lineColor.a);
+         else
+            drawColor.set(lineColor.b, lineColor.r, lineColor.g, lineColor.a);
+
+         ofVec2f offset((ch - (vizBuff->NumChannels() - 1) * .5f) * 2 * delta.y, (ch - (vizBuff->NumChannels() - 1) * .5f) * 2 * -delta.x);
+
+
+         bool skipGap = true;
+         float actualSection = wireSection;
+         if (wireLength - markerDist * 2 > wireSection)
+         {
+            // draw the gap if the wire extends too far
+            skipGap = false;
+            actualSection *= 0.5f;
+         }
+
+         // locations for markers and end/start points for the sections
+         ofVec2f sec1Mark = (start + offset) + (delta*actualSection);
+         ofVec2f sec2Mark = (start + offset) + (delta*(wireLength - actualSection));
+
+         ofBeginShape();
+         ofVertex(start + offset);
+         for (float i = 1; i < actualSection - 1; i += cableStepSize)
+         {
+            auto pos = (start + offset) + (delta*i);
+            float sample = vizBuff->GetSample((i / wireLength * numSamples), ch);
+            if (isnan(sample))
+            {
+               drawColor = ofColor(255, 0, 0);
+               sample = 0;
+            }
+            else
+            {
+               sample = sqrtf(fabsf(sample)) * (sample < 0 ? -1 : 1);
+               sample = ofClamp(sample, -1.0f, 1.0f);
+               drawColor.a = fabsf(sample) * lineAlpha;
+            }
+
+            pos.x += lineScale * sample * -delta.y;
+            pos.y += lineScale * sample * delta.x;
+            ofVertex(pos);
+         }
+         ofVertex(sec1Mark);
+         ofSetColor(drawColor);
+         ofEndShape();
+
+         if (skipGap)
+            continue;
+
+         // markers look like a voltage source on wiring diagrams: wwww> |I>
+
+         // first marker
+         ofBeginShape();
+         ofVertex(sec1Mark + (delta * markerDist) + (deltaParallel * markerScaleStart));
+         ofVertex(sec1Mark + (delta * markerDist) - (deltaParallel * markerScaleStart));
+         ofEndShape();
+
+         ofBeginShape();
+         ofVertex(sec1Mark + (delta * markerDist * 2) + (deltaParallel * markerScaleEnd));
+         ofVertex(sec1Mark + (delta * markerDist * 3));
+         ofVertex(sec1Mark + (delta * markerDist * 2) - (deltaParallel * markerScaleEnd));
+         ofEndShape();
+
+         // second section
+         ofBeginShape();
+         ofVertex(sec2Mark);
+         for (float i = wireLength - actualSection; i < wireLength - 1; i += cableStepSize)
+         {
+            auto pos = (start + offset) + (delta*i);
+            float sample = vizBuff->GetSample((i / wireLength * numSamples), ch);
+            if (isnan(sample))
+            {
+               drawColor = ofColor(255, 0, 0);
+               sample = 0;
+            }
+            else
+            {
+               sample = sqrtf(fabsf(sample)) * (sample < 0 ? -1 : 1);
+               sample = ofClamp(sample, -1.0f, 1.0f);
+               drawColor.a = fabsf(sample) * lineAlpha;
+            }
+
+            pos.x += lineScale * sample * -delta.y;
+            pos.y += lineScale * sample * delta.x;
+            ofVertex(pos);
+         }
+         ofVertex(end + offset);
+         ofSetColor(drawColor);
+         ofEndShape();
+
+         // second marker
+         ofBeginShape();
+         ofVertex(sec2Mark - (delta * markerDist) + (deltaParallel * markerScaleStart));
+         ofVertex(sec2Mark - (delta * markerDist) - (deltaParallel * markerScaleStart));
+         ofEndShape();
+
+         ofBeginShape();
+         ofVertex(sec2Mark - (delta * markerDist * 3) + (deltaParallel * markerScaleEnd));
+         ofVertex(sec2Mark - (delta * markerDist * 2));
+         ofVertex(sec2Mark - (delta * markerDist * 3) - (deltaParallel * markerScaleEnd));
+         ofEndShape();
+      }
+   }
+
+   ofPopStyle();
+   ofPopMatrix();
+}
+
 void Warp::Process(double time)
 {
    PROFILER(Warp);
