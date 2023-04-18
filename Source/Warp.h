@@ -45,7 +45,7 @@ public:
    void OnTransportAdvanced(float amount) override;
 
    //ITextEntryListener
-   void TextEntryComplete(TextEntry* entry) override;
+   void TextEntryComplete(TextEntry* entry) override {} // intentional stub
 
    virtual void LoadLayout(const ofxJSONElement& moduleInfo) override;
    virtual void SetUpFromSaveData() override;

@@ -261,7 +261,7 @@ void Warp::Render()
          if (skipGap)
             continue;
 
-         // markers look like a voltage source on wiring diagrams: wwww> |I>
+         // markers look like a voltage source on wiring diagrams: wwww> | >
 
          // first marker
          ofBeginShape();
@@ -329,7 +329,18 @@ void Warp::Process(double time)
 
    SyncBuffers();
 
-   // if we have nothing pointing to us, let's bail
+   if (mIdentPrev != mIdent) {
+      // when switching away from an ident, we need to update the maps
+      // this can be done in a few places, but most notably the text box
+      // OSC controls and snapshots modify the ident without going through TextEntryComplete,
+      // which is why we can't just rely on that
+      RemoveInputByIdent(this, mIdentPrev);
+      RemoveOutputByIdent(this, mIdentPrev);
+
+      mIdentPrev = mIdent;
+   }
+
+   // if we have nothing pointing to us, then we're assuredly not an input
    // FIXME: is there a better way of doing this?
 
    bool targeted = false;
@@ -348,6 +359,7 @@ void Warp::Process(double time)
 
    if (!targeted && GetTarget() == nullptr)
    {
+      // no function, ensure we're not in the maps
       RemoveInputByIdent(this, mIdent);
       RemoveOutputByIdent(this, mIdent);
    }
@@ -500,15 +512,6 @@ void Warp::DrawModuleUnclipped()
       if (mLastOutput[mIdent] != nullptr)
          DrawTextNormal("Last output on this ident: " + std::string(mLastOutput[mIdent]->Name()), 0, yOff += 10);
    }
-}
-
-void Warp::TextEntryComplete(TextEntry* entry)
-{
-   // when switching away from an ident, we need to update the maps
-   RemoveInputByIdent(this, mIdentPrev);
-   RemoveOutputByIdent(this, mIdentPrev);
-
-   mIdentPrev = mIdent;
 }
 
 void Warp::LoadLayout(const ofxJSONElement& moduleInfo)
