@@ -80,6 +80,7 @@ public:
    void DrawBeacon(int x, int y);
    IClickable* GetRootParent();
    IDrawableModule* GetModuleParent();
+   virtual void OnPatched(IDrawableModule* patcher) {}
    void SetOverrideDisplayName(std::string name)
    {
       mHasOverrideDisplayName = true;

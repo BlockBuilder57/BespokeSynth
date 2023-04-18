@@ -113,6 +113,9 @@ void PatchCableSource::SetPatchCableTarget(PatchCable* cable, IClickable* target
 
    cable->SetCableTarget(target);
 
+   if (target != nullptr)
+      target->OnPatched(cable->GetOwningModule());
+
    INoteReceiver* noteReceiver = dynamic_cast<INoteReceiver*>(target);
    if (noteReceiver)
       mNoteReceivers.push_back(noteReceiver);
