@@ -36,6 +36,10 @@ public:
    void CreateUIControls() override;
    void Render() override;
    bool HasDebugDraw() const override { return true; }
+   void OnPatched(IDrawableModule* patcher) override;
+
+   // IClickable
+   void PostRepatch(PatchCableSource* cableSource, bool fromUserClick) override;
 
    //IAudioSource
    void Process(double time) override;
@@ -64,16 +68,11 @@ private:
    void Exit() override;
 
    static std::map<std::string, std::vector<Warp*>> mInputs;
-   static std::map<std::string, std::vector<Warp*>> mOutputs;
    static std::map<std::string, Warp*> mLastOutput;
 
    static std::vector<Warp*>* GetInputsByIdent(std::string ident);
-   static std::vector<Warp*>* GetOutputsByIdent(std::string ident);
-
    static void AddInputByIdent(Warp* warp, std::string ident);
-   static void AddOutputByIdent(Warp* warp, std::string ident);
    static void RemoveInputByIdent(Warp* warp, std::string ident);
-   static void RemoveOutputByIdent(Warp* warp, std::string ident);
 
    enum class Behavior
    {
@@ -81,9 +80,11 @@ private:
       Input,
       Output
    };
-   Behavior mBehavior;
+   Behavior mBehavior{};
 
-   std::string mIdent{ "default" };
-   std::string mIdentPrev{ "default" };
+   std::vector<IDrawableModule*> mPatchers{};
+
+   std::string mIdent{};
+   std::string mIdentPrev{};
    TextEntry* mIdentEntry;
 };
